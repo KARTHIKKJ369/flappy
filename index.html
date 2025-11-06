@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Flappy Friends</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <div class="app">
+    <header>
+      <h1>Flappy Friends</h1>
+      <div class="controls">
+        <button id="startBtn">Start</button>
+        <button id="pauseBtn">Pause</button>
+        <button id="restartBtn">Restart</button>
+      </div>
+      <details class="uploads">
+        <summary>Customize</summary>
+        <label>
+          Player Image
+          <input id="imgUpload" type="file" accept="image/*" />
+        </label>
+        <label>
+          Collision Sound
+          <input id="hitUpload" type="file" accept="audio/*" />
+        </label>
+        <label>
+          Flap Sound
+          <input id="flapUpload" type="file" accept="audio/*" />
+        </label>
+        <label>
+          Flap Volume
+          <input id="flapVol" type="range" min="0" max="100" value="100" />
+        </label>
+      </details>
+      <div class="hud">
+        <div>Score: <span id="score">0</span></div>
+        <div>Best: <span id="best">0</span></div>
+      </div>
+    </header>
+
+    <main>
+      <canvas id="gameCanvas" width="480" height="640"></canvas>
+      <button id="flapBtn" aria-label="Flap">Flap</button>
+    </main>
+
+    <footer>
+      <p>Tap/Click or press Space/ArrowUp to flap. Upload your own image/audio and press Start.</p>
+    </footer>
+  </div>
+  <script src="./main.js"></script>
+</body>
+</html>
