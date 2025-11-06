@@ -2,50 +2,63 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
   <title>Flappy Friends</title>
   <link rel="stylesheet" href="./styles.css" />
 </head>
 <body>
   <div class="app">
     <header>
-      <h1>Flappy Friends</h1>
+      <h1>🎮 Flappy Friends</h1>
       <div class="controls">
-        <button id="startBtn">Start</button>
-        <button id="pauseBtn">Pause</button>
-        <button id="restartBtn">Restart</button>
+        <button id="startBtn">▶ Start</button>
+        <button id="pauseBtn">⏸ Pause</button>
+        <button id="restartBtn">🔄 Restart</button>
       </div>
       <details class="uploads">
-        <summary>Customize</summary>
-        <label>
-          Player Image
-          <input id="imgUpload" type="file" accept="image/*" />
-        </label>
-        <label>
-          Collision Sound
-          <input id="hitUpload" type="file" accept="audio/*" />
-        </label>
-        <label>
-          Flap Sound
-          <input id="flapUpload" type="file" accept="audio/*" />
-        </label>
-        <label>
-          Flap Volume
-          <input id="flapVol" type="range" min="0" max="100" value="100" />
-        </label>
+        <summary>⚙️ Customize</summary>
+        <div class="upload-grid">
+          <label>
+            <span>🖼️ Player Image</span>
+            <input id="imgUpload" type="file" accept="image/*" />
+          </label>
+          <label>
+            <span>💥 Collision Sound</span>
+            <input id="hitUpload" type="file" accept="audio/*" />
+          </label>
+          <label>
+            <span>🎵 Flap Sound</span>
+            <input id="flapUpload" type="file" accept="audio/*" />
+          </label>
+          <label>
+            <span>🔊 Flap Volume</span>
+            <input id="flapVol" type="range" min="0" max="100" value="100" />
+            <output id="volOutput">100%</output>
+          </label>
+        </div>
       </details>
       <div class="hud">
-        <div>Score: <span id="score">0</span></div>
-        <div>Best: <span id="best">0</span></div>
+        <div class="hud-item">
+          <span class="hud-label">Score</span>
+          <span id="score" class="hud-value">0</span>
+        </div>
+        <div class="hud-item">
+          <span class="hud-label">Best</span>
+          <span id="best" class="hud-value">0</span>
+        </div>
       </div>
     </header>
 
     <main>
-      <canvas id="gameCanvas" width="480" height="640"></canvas>
+      <div class="canvas-container">
+        <canvas id="gameCanvas" width="480" height="640"></canvas>
+      </div>
     </main>
 
     <footer>
-      <p>Tap/Click or press Space/ArrowUp to flap. Upload your own image/audio and press Start.</p>
+      <p>🎯 Tap/Click or press <kbd>Space</kbd> / <kbd>↑</kbd> to flap</p>
     </footer>
   </div>
   <script src="./main.js"></script>

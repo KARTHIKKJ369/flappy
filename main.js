@@ -7,10 +7,12 @@
   const startBtn = document.getElementById('startBtn');
   const pauseBtn = document.getElementById('pauseBtn');
   const restartBtn = document.getElementById('restartBtn');
+
   const imgUpload = document.getElementById('imgUpload');
   const hitUpload = document.getElementById('hitUpload');
   const flapUpload = document.getElementById('flapUpload');
   const flapVolInput = document.getElementById('flapVol');
+  const volOutput = document.getElementById('volOutput');
 
   // Game config
   const CFG = {
@@ -19,14 +21,14 @@
     pipeGap: 160,
     pipeWidth: 70,
     pipeSpeed: 2.6,
-    spawnEvery: 1500, // ms
+    spawnEvery: 1500,
     maxFallSpeed: 14,
     playerSize: 48,
     ground: 20
   };
 
   // State
-  let state = 'menu'; // menu | running | paused | gameover
+  let state = 'menu';
   let pipes = [];
   let lastTime = 0;
   let spawnTimer = 0;
@@ -43,17 +45,21 @@
     angle: 0
   };
 
-  // Assets: Image
+  // Assets
   let playerImg = null;
   let playerImgURL = null;
   let playerImgReady = false;
 
-  // Audio elements (reusable, preloaded)
   let flapAudioSrc = null;
   let flapAudioEl = null;
   let hitAudioSrc = null;
   let hitAudioEl = null;
   let userInteracted = false;
+
+  const FLAP_SFX_COOLDOWN = 400;
+  const FLAP_SFX_MAXLEN = 800;   // reduced from 2500ms to 800ms
+  let lastFlapSfxAt = -Infinity;
+  let flapStopTimerId = null;
 
   // Prime audio on first user gesture (fixes deploy/iOS autoplay issues)
   function primeAudio(el) {
@@ -61,24 +67,26 @@
     try {
       const prev = el.volume;
       el.volume = 0;
-      el.muted = true; // extra safety
-      el.play().then(() => {
-        el.pause();
-        el.currentTime = 0;
-        el.muted = false;
-        el.volume = prev;
-      }).catch(() => {
-        // ignore; will still be allowed after this gesture in most browsers
-        el.muted = false;
-        el.volume = prev;
-      });
+      el.muted = true;
+      const promise = el.play();
+      if (promise) {
+        promise.then(() => {
+          el.pause();
+          el.currentTime = 0;
+          el.muted = false;
+          el.volume = prev;
+        }).catch(() => {
+          el.muted = false;
+          el.volume = prev;
+        });
+      }
     } catch {}
   }
+
   function unlockAudioOnce() {
     if (userInteracted) return;
     userInteracted = true;
-    primeAudio(flapAudioEl);
-    primeAudio(hitAudioEl);
+    // Don't prime here - wait for actual game action
   }
   window.addEventListener('pointerdown', unlockAudioOnce, { once: true, capture: true });
   window.addEventListener('keydown', unlockAudioOnce, { once: true, capture: true });
@@ -117,10 +125,12 @@
   }
 
   function startGame() {
-    if (state === 'running') return;
     userInteracted = true;
-    if (state === 'menu' || state === 'gameover') resetGame();
-    state = 'running';
+    if (state !== 'running') {
+      resetGame();
+      state = 'running';
+      lastTime = performance.now();
+    }
     startBtn.disabled = true;
     pauseBtn.disabled = false;
   }
@@ -145,14 +155,23 @@
     state = 'gameover';
     startBtn.disabled = false;
     pauseBtn.disabled = true;
-    stopFlapSound(); // ensure no lingering flap audio
-    // Use preloaded collision audio if available
-    if (userInteracted && (hitAudioEl || hitAudioSrc)) {
-      const el = hitAudioEl || new Audio(hitAudioSrc);
+    stopFlapSound();
+    // Play collision sound once
+    if (userInteracted && hitAudioEl) {
       try {
-        el.currentTime = 0;
-        el.volume = 1;
-        el.play().catch(() => {});
+        hitAudioEl.loop = false; // ensure it doesn't loop
+        hitAudioEl.currentTime = 0;
+        hitAudioEl.volume = 1;
+        hitAudioEl.play().catch(() => {});
+        // Auto-stop after 2s max to prevent long sounds from playing forever
+        setTimeout(() => {
+          try {
+            if (hitAudioEl) {
+              hitAudioEl.pause();
+              hitAudioEl.currentTime = 0;
+            }
+          } catch {}
+        }, 2000);
       } catch {}
     }
   }
@@ -161,32 +180,18 @@
     if (state !== 'running') return;
     player.vy = CFG.flap;
 
-    // Play flap sound with cooldown; let it end naturally if short, cap if long
     const now = performance.now();
     if (userInteracted && flapAudioEl && now - lastFlapSfxAt >= FLAP_SFX_COOLDOWN) {
       lastFlapSfxAt = now;
-      stopFlapSound(); // reset before replay
+      stopFlapSound();
       try {
+        const volPct = flapVolInput ? Number(flapVolInput.value) : 100;
         flapAudioEl.loop = false;
         flapAudioEl.currentTime = 0;
-
-        // Use UI volume if present
-        const volPct = (typeof flapVolInput !== 'undefined' && flapVolInput) ? Number(flapVolInput.value) : 100;
         flapAudioEl.volume = Math.max(0, Math.min(1, volPct / 100));
-
         flapAudioEl.play().catch(() => {});
 
-        // Determine cap: if duration known, don't cut early unless it's longer than the cap
-        const durMs = isFinite(flapAudioEl.duration) && !isNaN(flapAudioEl.duration)
-          ? flapAudioEl.duration * 1000
-          : Infinity;
-        const capMs = Math.min(FLAP_SFX_MAXLEN, durMs);
-        if (capMs !== Infinity) {
-          flapStopTimerId = setTimeout(() => stopFlapSound(), capMs);
-        } else {
-          // Unknown duration; apply safety cap
-          flapStopTimerId = setTimeout(() => stopFlapSound(), FLAP_SFX_MAXLEN);
-        }
+        flapStopTimerId = setTimeout(() => stopFlapSound(), FLAP_SFX_MAXLEN);
       } catch {}
     }
   }
@@ -207,18 +212,21 @@
   }
 
   function update(dt) {
-    // Physics
-    player.vy += CFG.gravity;
-    if (player.vy > CFG.maxFallSpeed) player.vy = CFG.maxFallSpeed;
-    player.y += player.vy;
+    // Convert dt (ms) to a 60-fps multiplier
+    const k = (dt || 16.67) / 16.67;
 
-    // Tilt based on vy
+    // Physics
+    player.vy += CFG.gravity * k;
+    if (player.vy > CFG.maxFallSpeed) player.vy = CFG.maxFallSpeed;
+    player.y += player.vy * k;
+
+    // Tilt based on vy (unchanged)
     player.angle = Math.max(Math.min((player.vy / CFG.maxFallSpeed) * 0.8, 0.9), -0.45);
 
     // Pipes
     for (let i = pipes.length - 1; i >= 0; i--) {
       const p = pipes[i];
-      p.x -= CFG.pipeSpeed;
+      p.x -= CFG.pipeSpeed * k; // time-based movement
       // Scoring
       if (!p.passed && p.x + p.w < player.x) {
         p.passed = true;
@@ -230,7 +238,7 @@
       }
     }
 
-    // Spawn
+    // Spawn (dt already in ms)
     spawnTimer += dt;
     if (spawnTimer >= CFG.spawnEvery) {
       spawnTimer = 0;
@@ -279,9 +287,9 @@
 
     // HUD overlay for paused/gameover
     if (state === 'paused' || state === 'menu') {
-      drawOverlay(state === 'menu' ? 'Tap/Press Start' : 'Paused');
+      drawOverlay(state === 'menu' ? 'Click/Tap to Start' : 'Paused');
     } else if (state === 'gameover') {
-      drawOverlay('Game Over - Press Start');
+      drawOverlay('Game Over - Click/Tap to Restart');
     }
 
     // Score (big, centered)
@@ -363,8 +371,6 @@
     ctx.font = 'bold 28px system-ui, sans-serif';
     ctx.textAlign = 'center';
     ctx.fillText(text, canvas.width / 2, canvas.height / 2);
-    ctx.font = '14px system-ui, sans-serif';
-    ctx.fillText('Click/Touch to flap', canvas.width / 2, canvas.height / 2 + 26);
   }
 
   function drawClouds() {
@@ -433,10 +439,7 @@
     flapAudioEl.loop = false;
     flapAudioEl.preload = 'auto';
     try { flapAudioEl.load(); } catch {}
-    flapAudioEl.addEventListener('ended', () => {
-      if (flapStopTimerId) { clearTimeout(flapStopTimerId); flapStopTimerId = null; }
-    });
-    if (userInteracted) primeAudio(flapAudioEl);
+    // Removed: if (userInteracted) primeAudio(flapAudioEl);
   });
 
   hitUpload.addEventListener('change', () => {
@@ -448,7 +451,7 @@
     hitAudioEl.loop = false;
     hitAudioEl.preload = 'auto';
     try { hitAudioEl.load(); } catch {}
-    if (userInteracted) primeAudio(hitAudioEl);
+    // Removed: if (userInteracted) primeAudio(hitAudioEl);
   });
 
   // Controls
@@ -458,28 +461,57 @@
 
   // Input: keyboard
   window.addEventListener('keydown', (e) => {
-    if (e.repeat) return; // prevent auto-repeat causing continuous flaps/sound
-    if (e.code === 'Space' || e.code === 'ArrowUp') {
+    if (e.repeat) return;
+    const { code, key } = e;
+    const isFlapKey =
+      code === 'ArrowUp' ||
+      code === 'Space' || key === ' ' || key === 'Spacebar' ||
+      code === 'Enter' ||
+      code === 'KeyW' || key === 'w' || key === 'W';
+
+    if (isFlapKey) {
       e.preventDefault();
-      if (state === 'menu' || state === 'gameover') startGame();
-      flap();
-    } else if (e.code === 'KeyP') {
-      if (state === 'running') pauseGame(); else if (state === 'paused') startGame();
+      e.stopPropagation();
+      if (state !== 'running') {
+        startGame();
+      } else {
+        flap();
+      }
+    } else if (code === 'KeyP') {
+      if (state === 'running') pauseGame();
+      else if (state === 'paused') startGame();
     }
   });
 
   // Input: pointer/touch on canvas
   const flapFromPointer = () => {
-    if (state === 'menu' || state === 'gameover') startGame();
-    flap();
+    // Start game if not running
+    if (state !== 'running') {
+      startGame();
+    } else {
+      flap();
+    }
   };
   canvas.addEventListener('mousedown', flapFromPointer);
   canvas.addEventListener('touchstart', (e) => { e.preventDefault(); flapFromPointer(); }, { passive: false });
 
-  // Resize (keep internal resolution constant; CSS scales)
-  window.addEventListener('resize', () => {
-    // no-op; canvas is CSS-scaled for simplicity
-  });
+  // Restart on any click/touch outside controls when not running
+  const restartFromAnywhere = (e) => {
+    const tag = (e.target && e.target.tagName ? e.target.tagName.toLowerCase() : '');
+    if (['input','button','label','summary','details','a','select','textarea'].includes(tag)) return;
+    if (state !== 'running') {
+      startGame();
+    }
+  };
+  window.addEventListener('mousedown', restartFromAnywhere);
+  window.addEventListener('touchstart', restartFromAnywhere, { passive: true });
+
+  // Update volume output display
+  if (flapVolInput && volOutput) {
+    flapVolInput.addEventListener('input', () => {
+      volOutput.textContent = flapVolInput.value + '%';
+    });
+  }
 
   // Init UI
   bestEl.textContent = String(best);
