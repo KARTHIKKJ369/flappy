@@ -10,7 +10,6 @@
   const imgUpload = document.getElementById('imgUpload');
   const hitUpload = document.getElementById('hitUpload');
   const flapUpload = document.getElementById('flapUpload');
-  const flapBtn = document.getElementById('flapBtn');
   const flapVolInput = document.getElementById('flapVol');
 
   // Game config
@@ -49,17 +48,40 @@
   let playerImgURL = null;
   let playerImgReady = false;
 
-  // Assets: Audio
-  let flapAudioSrc = null; // object URL for flap sound
-  let flapAudioEl = null;  // reusable audio element
-  let hitAudioSrc = null;  // raw src for collision
+  // Audio elements (reusable, preloaded)
+  let flapAudioSrc = null;
+  let flapAudioEl = null;
+  let hitAudioSrc = null;
+  let hitAudioEl = null;
   let userInteracted = false;
 
-  // Flap sound timing: slightly longer and smoother
-  const FLAP_SFX_COOLDOWN = 300; // ms between flap sounds
-  const FLAP_SFX_MAXLEN = 1200;  // ms max duration cap (only cuts long files)
-  let lastFlapSfxAt = -Infinity;
-  let flapStopTimerId = null;
+  // Prime audio on first user gesture (fixes deploy/iOS autoplay issues)
+  function primeAudio(el) {
+    if (!el) return;
+    try {
+      const prev = el.volume;
+      el.volume = 0;
+      el.muted = true; // extra safety
+      el.play().then(() => {
+        el.pause();
+        el.currentTime = 0;
+        el.muted = false;
+        el.volume = prev;
+      }).catch(() => {
+        // ignore; will still be allowed after this gesture in most browsers
+        el.muted = false;
+        el.volume = prev;
+      });
+    } catch {}
+  }
+  function unlockAudioOnce() {
+    if (userInteracted) return;
+    userInteracted = true;
+    primeAudio(flapAudioEl);
+    primeAudio(hitAudioEl);
+  }
+  window.addEventListener('pointerdown', unlockAudioOnce, { once: true, capture: true });
+  window.addEventListener('keydown', unlockAudioOnce, { once: true, capture: true });
 
   function stopFlapSound() {
     if (flapStopTimerId) {
@@ -124,11 +146,14 @@
     startBtn.disabled = false;
     pauseBtn.disabled = true;
     stopFlapSound(); // ensure no lingering flap audio
-    // play collision sound once on game over
-    if (userInteracted && hitAudioSrc) {
-      const a = new Audio(hitAudioSrc);
-      a.volume = 0.8;
-      a.play().catch(() => {});
+    // Use preloaded collision audio if available
+    if (userInteracted && (hitAudioEl || hitAudioSrc)) {
+      const el = hitAudioEl || new Audio(hitAudioSrc);
+      try {
+        el.currentTime = 0;
+        el.volume = 1;
+        el.play().catch(() => {});
+      } catch {}
     }
   }
 
@@ -399,14 +424,6 @@
     img.src = playerImgURL;
   });
 
-  // New: Collision sound upload
-  hitUpload.addEventListener('change', () => {
-    const file = hitUpload.files && hitUpload.files[0];
-    if (!file) return;
-    if (hitAudioSrc) URL.revokeObjectURL(hitAudioSrc);
-    hitAudioSrc = URL.createObjectURL(file);
-  });
-
   flapUpload.addEventListener('change', () => {
     const file = flapUpload.files && flapUpload.files[0];
     if (!file) return;
@@ -415,13 +432,23 @@
     flapAudioEl = new Audio(flapAudioSrc);
     flapAudioEl.loop = false;
     flapAudioEl.preload = 'auto';
-    // Clear any pending cutoff when sound ends naturally
+    try { flapAudioEl.load(); } catch {}
     flapAudioEl.addEventListener('ended', () => {
-      if (flapStopTimerId) {
-        clearTimeout(flapStopTimerId);
-        flapStopTimerId = null;
-      }
+      if (flapStopTimerId) { clearTimeout(flapStopTimerId); flapStopTimerId = null; }
     });
+    if (userInteracted) primeAudio(flapAudioEl);
+  });
+
+  hitUpload.addEventListener('change', () => {
+    const file = hitUpload.files && hitUpload.files[0];
+    if (!file) return;
+    if (hitAudioSrc) URL.revokeObjectURL(hitAudioSrc);
+    hitAudioSrc = URL.createObjectURL(file);
+    hitAudioEl = new Audio(hitAudioSrc);
+    hitAudioEl.loop = false;
+    hitAudioEl.preload = 'auto';
+    try { hitAudioEl.load(); } catch {}
+    if (userInteracted) primeAudio(hitAudioEl);
   });
 
   // Controls
@@ -448,10 +475,6 @@
   };
   canvas.addEventListener('mousedown', flapFromPointer);
   canvas.addEventListener('touchstart', (e) => { e.preventDefault(); flapFromPointer(); }, { passive: false });
-
-  // New: Flap button (easy tap)
-  flapBtn.addEventListener('click', flapFromPointer);
-  flapBtn.addEventListener('touchstart', (e) => { e.preventDefault(); flapFromPointer(); }, { passive: false });
 
   // Resize (keep internal resolution constant; CSS scales)
   window.addEventListener('resize', () => {
